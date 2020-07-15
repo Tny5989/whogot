@@ -139,6 +139,11 @@ ashita.register_event('incoming_packet', function(id, size, packet)
     end
 
     local mobId = struct.unpack('I', packet, 0x04 + 1)
+    if whogot.claims[mobId] ~= nil then
+        -- already claimed
+        -- TODO: add a reset for when mob dies
+        return false
+    end
 
     local claimerName = struct.unpack('s', packet, 0x34 + 1)
     if string.len(claimerName) > 0 then
