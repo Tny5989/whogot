@@ -22,142 +22,150 @@
  *	DEALINGS IN THE SOFTWARE.
 ]]--
 
-_addon.author   = 'InoUno'
-_addon.name     = 'WhoGot'
-_addon.version  = '1.0.0'
 
-require 'common'
+--[[
+TODO:   Make sure the mobType filter is correct
+        Make sure player indices fall between 0x400 and 0x700
+        General code cleanup
+]]--
 
-whogot = {}
-whogot.claims = { }
+addon.author = 'InoUno & Tny5989'
+addon.name = 'WhoGot'
+addon.version = '1.0.0.1'
 
--------------------------------------------------
--- Misc. functionality
--------------------------------------------------
+require('common')
+local chat = require('chat')
 
-local function addonPrint(text)
-    print('\31\200[\31\05' .. _addon.name .. '\31\200]\30\01 ' .. text)
+local claims = {}
+local debug = false
+
+------------------------------------------------------------------------------------------------------------------------
+local function DebugPrint(...)
+    if (not debug) then
+        return
+    end
+    print(...)
 end
 
-local function getClaimerForId(id)
-    if type(whogot.claims[id]) == "number" then
-        local claimerName = GetNameByServerId(whogot.claims[id])
-        if claimerName ~= nil then
-            whogot.claims[id] = claimerName
+------------------------------------------------------------------------------------------------------------------------
+local function GetTarget()
+    local playerTarget = AshitaCore:GetMemoryManager():GetTarget()
+    if (playerTarget == nil) then
+        return nil
+    end
+
+    return playerTarget:GetTargetIndex(0)
+end
+
+------------------------------------------------------------------------------------------------------------------------
+local function GetClaimer(claimerId)
+    for i = 0x400, 0x700, 1 do
+        local serverId = AshitaCore:GetMemoryManager():GetEntity():GetServerId(i)
+        if (serverId == claimerId) then
+            return AshitaCore:GetMemoryManager():GetEntity():GetName(i)
         end
     end
-
-    return whogot.claims[id]
-end
-
-local function printClaimerForTarget()
-    local target = AshitaCore:GetDataManager():GetTarget()
-    local targetId = target:GetTargetServerId()
-    local targetName = target:GetTargetName()
-    if target == nil or targetId == nil or targetName == nil then
-        addonPrint("Invalid target.")
-        return false
-    end
-
-    local claimer = getClaimerForId(targetId)
-    if claimer == nil then
-        addonPrint("Not able to find claimer for \31\214" .. targetName .. "\31\01.")
-        return false
-    end
-
-    if type(claimer) == "number" then
-        addonPrint("\31\214" .. targetName .. "\31\01 was claimed by player with ID: \31\214" .. whogot.claims[targetId] .. "\31\01")
-    else
-        addonPrint("\31\214" .. targetName .. "\31\01 was claimed by: \31\214" .. whogot.claims[targetId] .. "\31\01")
-    end
-end
-
-function GetEntityByServerId(id)
-    for x = 0, 2303 do
-        -- Get the entity..
-        local e = GetEntity(x);
-
-        -- Ensure the entity is valid..
-        if (e ~= nil and e.WarpPointer ~= 0) then
-            if (e.ServerId == id) then
-                return e;
-            end
-        end
-    end
-    return nil;
-end
-
-function GetNameByServerId(id)
-    local entity = GetEntityByServerId(id)
-    if entity ~= nil and entity.Name ~= nil then
-        return entity.Name
-    end
-
     return nil
 end
 
+------------------------------------------------------------------------------------------------------------------------
+local function PrintClaimer(mobId, claimer)
+    if (mobId == 0) then
+        print(string.format('%s%s', chat.header(addon.name), chat.color2(38, 'Unknown Target')))
+        return
+    end
 
-----------------------------------------------------------------------------------------------------
--- func: command
--- desc: Event called when a command was entered.
-----------------------------------------------------------------------------------------------------
-ashita.register_event('command', function(command, ntype)
-    local args = command:args()
+    local mobName = AshitaCore:GetMemoryManager():GetEntity():GetName(mobId)
+    local claimerName = (claimer ~= nil and ((type(claimer) == 'number') and GetClaimer(claimer) or claimer) or nil)
+
+    if (claimerName == nil) then
+        print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, mobName), chat.color1(81, "->"), chat.color2(38, 'Unknown')))
+    else
+        print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, mobName), chat.color1(81, "->"), chat.success(claimerName)))
+    end
+end
+
+------------------------------------------------------------------------------------------------------------------------
+ashita.events.register('command', 'command_cb', function(e)
+    local args = e.command:args()
     if (args[1] ~= '/whogot') then
         return false
     end
 
     if (args[2] == 'all') then
-        for k,v in pairs(whogot.claims) do
-            addonPrint(k .. ": " .. v)
+        for mobId, claimer in pairs(claims) do
+            PrintClaimer(mobId, claimer)
         end
+        return true
+    elseif (args[2] == 'debug') then
+        debug = not debug
+        print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, 'Debug'), chat.color1(81, "->"), (debug and chat.success('On') or chat.color2(38, 'Off'))))
         return true
     end
 
-    printClaimerForTarget()
+    local mobId = GetTarget()
+    PrintClaimer(mobId, claims[mobId])
+
     return true
 end)
 
----------------------------------------------------------------------------------------------------
--- func: incoming_packet
--- desc: Called when our addon receives an incoming packet.
----------------------------------------------------------------------------------------------------
-ashita.register_event('incoming_packet', function(id, size, packet)
-    if id == 0x0B then -- zone, reset claim table
-        whogot.claims = {}
+------------------------------------------------------------------------------------------------------------------------
+ashita.events.register('packet_in', 'packet_in_cb', function(e)
+    if (e.id == 0x0B) then
+        -- zone, reset claim table
+        claims = {}
         return false
     end
 
-    if id ~= 0x0E then -- NPC update packet
+    if (e.id ~= 0x0E) then
+        -- NPC update packet
         return false
     end
 
-    local updateMask = struct.unpack('B', packet, 0x0A + 1)
-    if updateMask ~= 6 and updateMask ~= 7 then -- is claim packets
-        -- mask 3 is also claim, but I think this is the reset one
+    local updateMask = struct.unpack('B', e.data_modified, 0x0A + 1)
+    local hasClaimInfo = (bit.band(updateMask, 2) > 0)
+    local hasClaimName = (hasClaimInfo and (bit.band(updateMask, 8) == 0))
+    local mobDisappear = bit.band(updateMask, 32) > 0
+
+    if (not hasClaimInfo and not mobDisappear) then
         return false
     end
 
-    local mobId = struct.unpack('I', packet, 0x04 + 1)
-    if whogot.claims[mobId] ~= nil then
-        -- already claimed
-        -- TODO: add a reset for when mob dies
+    local mobIndex = struct.unpack('H', e.data_modified, 0x08 + 1)
+    local mobType = AshitaCore:GetMemoryManager():GetEntity():GetType(mobIndex)
+    if (mobDisappear) then
+        claims[mobIndex] = nil
         return false
     end
 
-    local claimerName = struct.unpack('s', packet, 0x34 + 1)
-    if string.len(claimerName) > 0 then
-        whogot.claims[mobId] = claimerName
+    if (claims[mobIndex] ~= nil) then
         return false
     end
 
-    local claimerId = struct.unpack('I', packet, 0x2C + 1)
+    if (mobType == 0) then
+        -- Non-killable NPCs
+        return false;
+    end
 
-    claimerName = GetNameByServerId(claimerId)
-    if claimerName ~= nil then
-        whogot.claims[mobId] = claimerName
-    else
-        whogot.claims[mobId] = claimerId
+    if (hasClaimName) then
+        local claimerName = struct.unpack('s', e.data_modified, 0x34 + 1)
+        if (string.len(claimerName) > 0) then
+            DebugPrint(string.format('adding claimer(%s) for mob(%d) with mobType(%d)', claimerName, mobIndex, mobType))
+            claims[mobIndex] = tostring(claimerName)
+            return false
+        end
+    end
+
+    local claimerId = struct.unpack('I', e.data_modified, 0x2C + 1)
+    if (claimerId > 0) then
+        local claimerName = GetClaimer(claimerId)
+        if (claimerName ~= nil) then
+            DebugPrint(string.format('adding claimer(%s) for mob(%d) with mobType(%d)', claimerName, mobIndex, mobType))
+            claims[mobIndex] = tostring(claimerName)
+        else
+            DebugPrint(string.format('adding claimer(%d) for mob(%d) with mobType(%d)', claimerId, mobIndex, mobType))
+            claims[mobIndex] = tonumber(claimerId)
+        end
     end
 
     return false
