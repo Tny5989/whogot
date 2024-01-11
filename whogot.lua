@@ -25,7 +25,6 @@
 
 --[[
 TODO:   Make sure the mobType filter is correct
-        Make sure player indices fall between 0x400 and 0x700
         General code cleanup
 ]]--
 
@@ -38,6 +37,8 @@ local chat = require('chat')
 
 local claims = {}
 local debug = false
+local pruneDead = false
+local pruneUnclaimed = true
 
 ------------------------------------------------------------------------------------------------------------------------
 local function DebugPrint(...)
@@ -69,19 +70,19 @@ local function GetClaimer(claimerId)
 end
 
 ------------------------------------------------------------------------------------------------------------------------
-local function PrintClaimer(mobId, claimer)
+local function PrintClaimer(mobId, claimInfo)
     if (mobId == 0) then
         print(string.format('%s%s', chat.header(addon.name), chat.color2(38, 'Unknown Target')))
         return
     end
 
     local mobName = AshitaCore:GetMemoryManager():GetEntity():GetName(mobId)
-    local claimerName = (claimer ~= nil and ((type(claimer) == 'number') and GetClaimer(claimer) or claimer) or nil)
+    local claimerName = (claimInfo.claimer ~= nil and ((type(claimInfo.claimer) == 'number') and GetClaimer(claimInfo.claimer) or claimInfo.claimer) or nil)
 
     if (claimerName == nil) then
-        print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, mobName), chat.color1(81, "->"), chat.color2(38, 'Unknown')))
+        print(string.format('%s%s %s %s %s %s', chat.header(addon.name), chat.color2(59, mobName), chat.color1(81, "->"), chat.color2(38, 'Unknown'), chat.color1(81, '@'), chat.color2(59, claimInfo.time)))
     else
-        print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, mobName), chat.color1(81, "->"), chat.success(claimerName)))
+        print(string.format('%s%s %s %s %s %s', chat.header(addon.name), chat.color2(59, mobName), chat.color1(81, "->"), chat.success(claimerName), chat.color1(81, '@'), chat.color2(59, claimInfo.time)))
     end
 end
 
@@ -92,14 +93,27 @@ ashita.events.register('command', 'command_cb', function(e)
         return false
     end
 
-    if (args[2] == 'all') then
+    if (args[2] == 'all' or args[2] == 'a') then
         for mobId, claimer in pairs(claims) do
             PrintClaimer(mobId, claimer)
         end
         return true
-    elseif (args[2] == 'debug') then
+    elseif (args[2] == 'debug' or args[2] == 'd') then
         debug = not debug
         print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, 'Debug'), chat.color1(81, "->"), (debug and chat.success('On') or chat.color2(38, 'Off'))))
+        return true
+    elseif (args[2] == 'clear' or args[2] == 'c') then
+        claims = {}
+        print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, 'Claims'), chat.color1(81, "->"), chat.success('Cleared')))
+        return true
+    elseif (args[2] == 'prune' or args[2] == 'p') then
+        if (args[3] == 'dead' or args[3] == 'd') then
+            pruneDead = not pruneDead
+            print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, 'Prune Dead'), chat.color1(81, "->"), (pruneDead and chat.success('On') or chat.color2(38, 'Off'))))
+        elseif (args[3] == 'unclaimed' or args[3] == 'u') then
+            pruneUnclaimed = not pruneUnclaimed
+            print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, 'Prune Unclaimed'), chat.color1(81, "->"), (pruneUnclaimed and chat.success('On') or chat.color2(38, 'Off'))))
+        end
         return true
     end
 
@@ -126,6 +140,7 @@ ashita.events.register('packet_in', 'packet_in_cb', function(e)
     local hasClaimInfo = (bit.band(updateMask, 2) > 0)
     local hasClaimName = (hasClaimInfo and (bit.band(updateMask, 8) == 0))
     local mobDisappear = bit.band(updateMask, 32) > 0
+    local time = os.date('[%I:%M:%S]', os.time())
 
     if (not hasClaimInfo and not mobDisappear) then
         return false
@@ -133,7 +148,7 @@ ashita.events.register('packet_in', 'packet_in_cb', function(e)
 
     local mobIndex = struct.unpack('H', e.data_modified, 0x08 + 1)
     local mobType = AshitaCore:GetMemoryManager():GetEntity():GetType(mobIndex)
-    if (mobDisappear) then
+    if (mobDisappear and pruneDead) then
         claims[mobIndex] = nil
         return false
     end
@@ -150,21 +165,23 @@ ashita.events.register('packet_in', 'packet_in_cb', function(e)
     if (hasClaimName) then
         local claimerName = struct.unpack('s', e.data_modified, 0x34 + 1)
         if (string.len(claimerName) > 0) then
-            DebugPrint(string.format('adding claimer(%s) for mob(%d) with mobType(%d)', claimerName, mobIndex, mobType))
-            claims[mobIndex] = tostring(claimerName)
+            DebugPrint(string.format('adding claimer(%s) for mob(%d) with mobType(%d) at(%s)', claimerName, mobIndex, mobType, time))
+            claims[mobIndex] = { claimer = tostring(claimerName), time = time }
             return false
         end
     end
 
     local claimerId = struct.unpack('I', e.data_modified, 0x2C + 1)
-    if (claimerId > 0) then
+    if (claims[mobIndex] ~= nil and claimerId == 0 and pruneUnclaimed) then
+        claims[mobIndex] = nil
+    elseif (claimerId > 0) then
         local claimerName = GetClaimer(claimerId)
         if (claimerName ~= nil) then
-            DebugPrint(string.format('adding claimer(%s) for mob(%d) with mobType(%d)', claimerName, mobIndex, mobType))
-            claims[mobIndex] = tostring(claimerName)
+            DebugPrint(string.format('adding claimer(%s) for mob(%d) with mobType(%d) at(%s)', claimerName, mobIndex, mobType, time))
+            claims[mobIndex] = { claimer = tostring(claimerName), time = time }
         else
-            DebugPrint(string.format('adding claimer(%d) for mob(%d) with mobType(%d)', claimerId, mobIndex, mobType))
-            claims[mobIndex] = tonumber(claimerId)
+            DebugPrint(string.format('adding claimer(%d) for mob(%d) with mobType(%d) at(%s)', claimerId, mobIndex, mobType, time))
+            claims[mobIndex] = { claimer = tonumber(claimerId), time = time }
         end
     end
 
