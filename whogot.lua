@@ -162,7 +162,7 @@ ashita.events.register('packet_in', 'packet_in_cb', function(e)
         return false
     end
 
-    if (mobType == 0 or mobType == 1) then
+    if (mobType ~= 2) then
         -- Non-killable NPCs
         return false;
     end
