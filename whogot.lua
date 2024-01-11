@@ -34,11 +34,17 @@ addon.version = '1.0.0.1'
 
 require('common')
 local chat = require('chat')
+local settings = require('settings');
 
-local claims = {}
-local debug = false
-local pruneDead = false
-local pruneUnclaimed = true
+local defaultSettings = T {
+    debug = false,
+    pruneDead = false,
+    pruneUnclaimed = true,
+}
+local whoGot = {
+    claims = {},
+    settings = settings.load(defaultSettings),
+}
 
 ------------------------------------------------------------------------------------------------------------------------
 local function DebugPrint(...)
@@ -94,31 +100,35 @@ ashita.events.register('command', 'command_cb', function(e)
     end
 
     if (args[2] == 'all' or args[2] == 'a') then
-        for mobId, claimer in pairs(claims) do
+        for mobId, claimer in pairs(whoGot.claims) do
             PrintClaimer(mobId, claimer)
         end
         return true
     elseif (args[2] == 'debug' or args[2] == 'd') then
-        debug = not debug
-        print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, 'Debug'), chat.color1(81, "->"), (debug and chat.success('On') or chat.color2(38, 'Off'))))
+        whoGot.settings.debug = not whoGot.settings.debug
+        settings.save()
+        print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, 'Debug'), chat.color1(81, "->"), (whoGot.settings.debug and chat.success('On') or chat.color2(38, 'Off'))))
         return true
     elseif (args[2] == 'clear' or args[2] == 'c') then
-        claims = {}
+        whoGot.claims = {}
+        settings.save()
         print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, 'Claims'), chat.color1(81, "->"), chat.success('Cleared')))
         return true
     elseif (args[2] == 'prune' or args[2] == 'p') then
         if (args[3] == 'dead' or args[3] == 'd') then
-            pruneDead = not pruneDead
-            print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, 'Prune Dead'), chat.color1(81, "->"), (pruneDead and chat.success('On') or chat.color2(38, 'Off'))))
+            whoGot.settings.pruneDead = not whoGot.settings.pruneDead
+            settings.save()
+            print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, 'Prune Dead'), chat.color1(81, "->"), (whoGot.settings.pruneDead and chat.success('On') or chat.color2(38, 'Off'))))
         elseif (args[3] == 'unclaimed' or args[3] == 'u') then
-            pruneUnclaimed = not pruneUnclaimed
-            print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, 'Prune Unclaimed'), chat.color1(81, "->"), (pruneUnclaimed and chat.success('On') or chat.color2(38, 'Off'))))
+            whoGot.settings.pruneUnclaimed = not whoGot.settings.pruneUnclaimed
+            settings.save()
+            print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, 'Prune Unclaimed'), chat.color1(81, "->"), (whoGot.settings.pruneUnclaimed and chat.success('On') or chat.color2(38, 'Off'))))
         end
         return true
     end
 
     local mobId = GetTarget()
-    PrintClaimer(mobId, claims[mobId])
+    PrintClaimer(mobId, whoGot.claims[mobId])
 
     return true
 end)
@@ -127,7 +137,7 @@ end)
 ashita.events.register('packet_in', 'packet_in_cb', function(e)
     if (e.id == 0x0B) then
         -- zone, reset claim table
-        claims = {}
+        whoGot.claims = {}
         return false
     end
 
@@ -148,12 +158,13 @@ ashita.events.register('packet_in', 'packet_in_cb', function(e)
 
     local mobIndex = struct.unpack('H', e.data_modified, 0x08 + 1)
     local mobType = AshitaCore:GetMemoryManager():GetEntity():GetType(mobIndex)
-    if (mobDisappear and pruneDead) then
-        claims[mobIndex] = nil
+    if (mobDisappear and whoGot.claims[mobIndex] ~= nil and whoGot.settings.pruneDead) then
+        DebugPrint(string.format('resetting claim for dead mob(%d) at(%s)', mobIndex, time))
+        whoGot.claims[mobIndex] = nil
         return false
     end
 
-    if (claims[mobIndex] ~= nil) then
+    if (whoGot.claims[mobIndex] ~= nil) then
         return false
     end
 
@@ -166,22 +177,23 @@ ashita.events.register('packet_in', 'packet_in_cb', function(e)
         local claimerName = struct.unpack('s', e.data_modified, 0x34 + 1)
         if (string.len(claimerName) > 0) then
             DebugPrint(string.format('adding claimer(%s) for mob(%d) with mobType(%d) at(%s)', claimerName, mobIndex, mobType, time))
-            claims[mobIndex] = { claimer = tostring(claimerName), time = time }
+            whoGot.claims[mobIndex] = { claimer = tostring(claimerName), time = time }
             return false
         end
     end
 
     local claimerId = struct.unpack('I', e.data_modified, 0x2C + 1)
-    if (claims[mobIndex] ~= nil and claimerId == 0 and pruneUnclaimed) then
-        claims[mobIndex] = nil
+    if (whoGot.claims[mobIndex] ~= nil and claimerId == 0 and whoGot.settings.pruneUnclaimed) then
+        DebugPrint(string.format('resetting claim for mob(%d) at(%s)', mobIndex, time))
+        whoGot.claims[mobIndex] = nil
     elseif (claimerId > 0) then
         local claimerName = GetClaimer(claimerId)
         if (claimerName ~= nil) then
             DebugPrint(string.format('adding claimer(%s) for mob(%d) with mobType(%d) at(%s)', claimerName, mobIndex, mobType, time))
-            claims[mobIndex] = { claimer = tostring(claimerName), time = time }
+            whoGot.claims[mobIndex] = { claimer = tostring(claimerName), time = time }
         else
             DebugPrint(string.format('adding claimer(%d) for mob(%d) with mobType(%d) at(%s)', claimerId, mobIndex, mobType, time))
-            claims[mobIndex] = { claimer = tonumber(claimerId), time = time }
+            whoGot.claims[mobIndex] = { claimer = tonumber(claimerId), time = time }
         end
     end
 
