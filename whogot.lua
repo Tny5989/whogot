@@ -30,7 +30,7 @@ TODO:   Make sure the mobType filter is correct
 
 addon.author = 'InoUno & Tny5989'
 addon.name = 'WhoGot'
-addon.version = '1.0.0.1'
+addon.version = '1.0.0.2'
 
 require('common')
 local chat = require('chat')
@@ -84,10 +84,10 @@ local function PrintClaimer(mobId, claimInfo)
     end
 
     local mobName = AshitaCore:GetMemoryManager():GetEntity():GetName(mobId)
-    local claimerName = (claimInfo.claimer ~= nil and ((type(claimInfo.claimer) == 'number') and GetClaimer(claimInfo.claimer) or claimInfo.claimer) or nil)
+    local claimerName = (( claimInfo ~= nil and claimInfo.claimer ~= nil) and ((type(claimInfo.claimer) == 'number') and GetClaimer(claimInfo.claimer) or claimInfo.claimer) or nil)
 
     if (claimerName == nil) then
-        print(string.format('%s%s %s %s %s %s', chat.header(addon.name), chat.color2(59, mobName), chat.color1(81, "->"), chat.color2(38, 'Unknown'), chat.color1(81, '@'), chat.color2(59, claimInfo.time)))
+        print(string.format('%s%s %s %s', chat.header(addon.name), chat.color2(59, mobName), chat.color1(81, "->"), chat.color2(38, 'Unknown')))
     else
         print(string.format('%s%s %s %s %s %s', chat.header(addon.name), chat.color2(59, mobName), chat.color1(81, "->"), chat.success(claimerName), chat.color1(81, '@'), chat.color2(59, claimInfo.time)))
     end
