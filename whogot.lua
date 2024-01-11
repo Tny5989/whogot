@@ -36,6 +36,7 @@ require('common')
 local chat = require('chat')
 local settings = require('settings');
 
+------------------------------------------------------------------------------------------------------------------------
 local defaultSettings = T {
     debug = false,
     pruneDead = false,
