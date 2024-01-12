@@ -2,6 +2,8 @@ local printers = {}
 
 local chat = require('chat')
 
+printers.settings = { debug = false, }
+
 ------------------------------------------------------------------------------------------------------------------------
 function printers.Addon(...)
     local args = { ... }
@@ -12,7 +14,7 @@ end
 
 ------------------------------------------------------------------------------------------------------------------------
 function printers.Debug(...)
-    if (not debug) then
+    if (not printers.settings.debug) then
         return
     end
     printers.Addon(...)
