@@ -141,12 +141,11 @@ ashita.events.register('packet_in', 'packet_in_cb', function(e)
     end
 
     local updateMask = struct.unpack('B', e.data_modified, 0x0A + 1)
-    local hasClaimInfo = (bit.band(updateMask, 2) > 0)
-    local hasClaimName = (hasClaimInfo and (bit.band(updateMask, 8) == 0))
+    local hasClaimId = (bit.band(updateMask, 2) > 0)
     local mobDisappear = (whoGot.settings.pruneDead and (bit.band(updateMask, 32) > 0))
     local time = os.date('[%I:%M:%S]', os.time())
 
-    if (not hasClaimInfo and not mobDisappear) then
+    if (not hasClaimId and not mobDisappear) then
         return false
     end
 
@@ -165,15 +164,6 @@ ashita.events.register('packet_in', 'packet_in_cb', function(e)
     if (mobType ~= 2) then
         -- Non-killable NPCs
         return false;
-    end
-
-    if (hasClaimName) then
-        local claimerName = struct.unpack('s', e.data_modified, 0x34 + 1)
-        if (string.len(claimerName) > 0) then
-            print.Debug(string.format('adding claimer(%s) for mob(%d) with mobType(%d) at(%s)', claimerName, mobIndex, mobType, time))
-            whoGot.claims[mobIndex] = { claimer = tostring(claimerName), time = time }
-            return false
-        end
     end
 
     local claimerId = struct.unpack('I', e.data_modified, 0x2C + 1)
