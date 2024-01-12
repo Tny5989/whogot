@@ -30,7 +30,7 @@ TODO:   Make sure the mobType filter is correct
 
 addon.author = 'InoUno & Tny5989'
 addon.name = 'WhoGot'
-addon.version = '1.0.0.3'
+addon.version = '1.0.0.4'
 
 require('common')
 local settings = require('settings');
